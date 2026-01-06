@@ -1,5 +1,13 @@
-import { Plugin, PluginSettingTab, Setting, MarkdownPostProcessorContext, setTooltip, App } from 'obsidian';
-import * as child_process from 'child_process';
+import {
+	App,
+	FileSystemAdapter,
+	MarkdownPostProcessorContext,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	setTooltip
+} from "obsidian";
+import * as child_process from "child_process";
 
 interface CommitDetail {
 	hash: string;
@@ -37,12 +45,22 @@ export default class GitHeatmapPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 		this.addSettingTab(new GitHeatmapSettingTab(this.app, this));
+
 		this.registerMarkdownCodeBlockProcessor("git-heatmap", (source, el, ctx) => {
-			this.processHeatmap(source, el, ctx);
+			void this.processHeatmap(source, el, ctx);
 		});
+
 		this.registerMarkdownCodeBlockProcessor("githeat", (source, el, ctx) => {
-			this.processHeatmap(source, el, ctx);
+			void this.processHeatmap(source, el, ctx);
 		});
+	}
+
+	onunload() {
+		// ✅ avoid leaking key listener
+		if (this.keyHandler) {
+			window.removeEventListener("keydown", this.keyHandler);
+			this.keyHandler = null;
+		}
 	}
 
 	async loadSettings() {
@@ -66,28 +84,31 @@ export default class GitHeatmapPlugin extends Plugin {
 		infoArea.createDiv({ cls: "info-placeholder", text: "Select a square" });
 
 		let displayDays = this.settings.defaultDays;
-		const lines = source.split('\n');
+		const lines = source.split("\n");
 		for (const line of lines) {
-			const parts = line.split(':');
-			if (parts.length === 2 && ['days', 'day'].includes(parts[0].trim().toLowerCase())) {
+			const parts = line.split(":");
+			if (parts.length === 2 && ["days", "day"].includes(parts[0].trim().toLowerCase())) {
 				const parsed = parseInt(parts[1].trim());
 				if (!isNaN(parsed) && parsed > 0) displayDays = parsed;
 			}
 		}
 
 		try {
-			const adapter = this.app.vault.adapter as any;
-			if (!adapter.getBasePath) throw new Error("无法获取 Vault 路径");
+			// ✅ remove `any`, enforce desktop adapter
+			const adapter = this.app.vault.adapter;
+			if (!(adapter instanceof FileSystemAdapter)) {
+				throw new Error("GitHeat only supports desktop vaults.");
+			}
 			const basePath = adapter.getBasePath();
 
 			const gitLog = await this.getGitLog(basePath, displayDays);
 			const stats = this.parseGitLog(gitLog);
 
 			this.renderHeatmap(scrollArea, infoArea, stats, basePath, displayDays);
-
-		} catch (error: any) {
+		} catch (error) {
 			scrollArea.empty();
-			scrollArea.createEl('div', { text: `⚠️ ${error.message}`, cls: 'error-notice' });
+			const message = error instanceof Error ? error.message : String(error);
+			scrollArea.createEl("div", { text: `⚠️ ${message}`, cls: "error-notice" });
 		}
 	}
 
@@ -95,22 +116,28 @@ export default class GitHeatmapPlugin extends Plugin {
 		return new Promise((resolve, reject) => {
 			const date = new Date();
 			date.setDate(date.getDate() - days);
-			const sinceDate = date.toISOString().split('T')[0];
+			const sinceDate = date.toISOString().split("T")[0];
 			const cmd = `git log --since="${sinceDate}" --date=short --format="%ad"`;
+
 			child_process.exec(cmd, { cwd }, (err, stdout) => {
-				if (err && !stdout) { reject(new Error("No Git Log")); return; }
+				if (err && !stdout) {
+					reject(new Error("No Git Log"));
+					return;
+				}
 				resolve(stdout || "");
 			});
 		});
 	}
 
 	parseGitLog(log: string): Map<string, number> {
-		const lines = log.split('\n').filter(l => l.trim());
+		const lines = log.split("\n").filter((l) => l.trim());
 		const stats = new Map<string, number>();
-		lines.forEach(date => {
+
+		lines.forEach((date) => {
 			const cleanDate = date.trim();
 			stats.set(cleanDate, (stats.get(cleanDate) || 0) + 1);
 		});
+
 		return stats;
 	}
 
@@ -121,7 +148,7 @@ export default class GitHeatmapPlugin extends Plugin {
 		basePath: string,
 		displayDays: number
 	) {
-		const isDarkMode = document.body.classList.contains('theme-dark');
+		const isDarkMode = document.body.classList.contains("theme-dark");
 		const colors = isDarkMode ? PALETTE.dark : PALETTE.light;
 
 		const blockSize = 12;
@@ -141,14 +168,14 @@ export default class GitHeatmapPlugin extends Plugin {
 		const fullWidth = totalWeeks * (blockSize + blockGap) + marginX * 2;
 		const fullHeight = 7 * (blockSize + blockGap) + marginY + 25;
 
-		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-		svg.setAttribute('class', 'git-heatmap-svg');
-		svg.setAttribute('width', `${fullWidth}`);
-		svg.setAttribute('height', `${fullHeight}`);
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		svg.setAttribute("class", "git-heatmap-svg");
+		svg.setAttribute("width", `${fullWidth}`);
+		svg.setAttribute("height", `${fullHeight}`);
 		container.appendChild(svg);
 
-		const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-		group.setAttribute('transform', `translate(${marginX}, ${marginY})`);
+		const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+		group.setAttribute("transform", `translate(${marginX}, ${marginY})`);
 		svg.appendChild(group);
 
 		// ✅ unified selection logic (click + keyboard)
@@ -157,28 +184,29 @@ export default class GitHeatmapPlugin extends Plugin {
 			const meta = this.gridMeta?.[row]?.[col];
 			if (!rect || !meta) return;
 
-			if (this.activeRect) this.activeRect.classList.remove('active-selected');
-			rect.classList.add('active-selected');
+			if (this.activeRect) this.activeRect.classList.remove("active-selected");
+			rect.classList.add("active-selected");
 			this.activeRect = rect;
 			this.currentPos = { row, col };
 
 			// ✅ auto scroll into view
 			rect.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
 
-			this.updateInfoArea(infoContainer, meta.dateStr, meta.count, basePath);
+			// ✅ Required: explicitly ignore Promise
+			void this.updateInfoArea(infoContainer, meta.dateStr, meta.count, basePath);
 		};
 
 		// --- 星期标签 ---
-		const weekLabels = { 1: 'Mon', 3: 'Wed', 5: 'Fri' };
+		const weekLabels = { 1: "Mon", 3: "Wed", 5: "Fri" };
 		Object.keys(weekLabels).forEach((idxStr) => {
 			const index = parseInt(idxStr);
 			const label = weekLabels[index as keyof typeof weekLabels];
-			const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+			const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
 			text.textContent = label;
-			text.setAttribute('x', '-5');
-			text.setAttribute('y', `${index * (blockSize + blockGap) + blockSize - 2}`);
-			text.setAttribute('text-anchor', 'end');
-			text.setAttribute('class', 'heatmap-label');
+			text.setAttribute("x", "-5");
+			text.setAttribute("y", `${index * (blockSize + blockGap) + blockSize - 2}`);
+			text.setAttribute("text-anchor", "end");
+			text.setAttribute("class", "heatmap-label");
 			group.appendChild(text);
 		});
 
@@ -196,18 +224,18 @@ export default class GitHeatmapPlugin extends Plugin {
 			if (!this.gridMeta[row]) this.gridMeta[row] = [];
 
 			const currentMonth = currentDate.getMonth();
-			if (((col === 0 && i === 0) || (row === 0)) && currentMonth !== lastMonth) {
+			if (((col === 0 && i === 0) || row === 0) && currentMonth !== lastMonth) {
 				const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-				const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+				const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
 				text.textContent = monthNames[currentMonth];
-				text.setAttribute('x', `${col * (blockSize + blockGap)}`);
-				text.setAttribute('y', '-6');
-				text.setAttribute('class', 'heatmap-label');
+				text.setAttribute("x", `${col * (blockSize + blockGap)}`);
+				text.setAttribute("y", "-6");
+				text.setAttribute("class", "heatmap-label");
 				group.appendChild(text);
 				lastMonth = currentMonth;
 			}
 
-			const dateStr = currentDate.toISOString().split('T')[0];
+			const dateStr = currentDate.toISOString().split("T")[0];
 			const count = stats.get(dateStr) || 0;
 
 			let level = 0;
@@ -216,14 +244,14 @@ export default class GitHeatmapPlugin extends Plugin {
 			if (count > 6) level = 3;
 			if (count > 10) level = 4;
 
-			const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-			rect.setAttribute('x', `${col * (blockSize + blockGap)}`);
-			rect.setAttribute('y', `${row * (blockSize + blockGap)}`);
-			rect.setAttribute('width', `${blockSize}`);
-			rect.setAttribute('height', `${blockSize}`);
-			rect.setAttribute('rx', '2');
-			rect.setAttribute('fill', colors[level]);
-			rect.setAttribute('class', 'heatmap-rect');
+			const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+			rect.setAttribute("x", `${col * (blockSize + blockGap)}`);
+			rect.setAttribute("y", `${row * (blockSize + blockGap)}`);
+			rect.setAttribute("width", `${blockSize}`);
+			rect.setAttribute("height", `${blockSize}`);
+			rect.setAttribute("rx", "2");
+			rect.setAttribute("fill", colors[level]);
+			rect.setAttribute("class", "heatmap-rect");
 
 			// store rect/meta
 			this.gridRects[row][col] = rect;
@@ -231,7 +259,7 @@ export default class GitHeatmapPlugin extends Plugin {
 
 			setTooltip(rect as unknown as HTMLElement, `${dateStr}: ${count} commits`);
 
-			rect.addEventListener('click', (e) => {
+			rect.addEventListener("click", (e) => {
 				e.stopPropagation();
 				selectCell(row, col);
 			});
@@ -240,35 +268,35 @@ export default class GitHeatmapPlugin extends Plugin {
 		}
 
 		// --- Legend (Less ... More) ---
-		const legendGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-		const legendWidth = (colors.length * (blockSize + blockGap)) + 60;
+		const legendGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+		const legendWidth = colors.length * (blockSize + blockGap) + 60;
 		const legendX = fullWidth - marginX - legendWidth + 20;
 		const legendY = fullHeight - 5;
 
-		const textLess = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+		const textLess = document.createElementNS("http://www.w3.org/2000/svg", "text");
 		textLess.textContent = "Less";
-		textLess.setAttribute('x', `${legendX + 15}`);
-		textLess.setAttribute('y', `${legendY - 3}`);
-		textLess.setAttribute('text-anchor', 'end');
-		textLess.setAttribute('class', 'heatmap-label');
+		textLess.setAttribute("x", `${legendX + 15}`);
+		textLess.setAttribute("y", `${legendY - 3}`);
+		textLess.setAttribute("text-anchor", "end");
+		textLess.setAttribute("class", "heatmap-label");
 		legendGroup.appendChild(textLess);
 
 		colors.forEach((c, idx) => {
-			const lRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-			lRect.setAttribute('x', `${legendX + 20 + idx * (blockSize + blockGap)}`);
-			lRect.setAttribute('y', `${legendY - blockSize}`);
-			lRect.setAttribute('width', `${blockSize}`);
-			lRect.setAttribute('height', `${blockSize}`);
-			lRect.setAttribute('rx', '2');
-			lRect.setAttribute('fill', c);
+			const lRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+			lRect.setAttribute("x", `${legendX + 20 + idx * (blockSize + blockGap)}`);
+			lRect.setAttribute("y", `${legendY - blockSize}`);
+			lRect.setAttribute("width", `${blockSize}`);
+			lRect.setAttribute("height", `${blockSize}`);
+			lRect.setAttribute("rx", "2");
+			lRect.setAttribute("fill", c);
 			legendGroup.appendChild(lRect);
 		});
 
-		const textMore = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+		const textMore = document.createElementNS("http://www.w3.org/2000/svg", "text");
 		textMore.textContent = "More";
-		textMore.setAttribute('x', `${legendX + 20 + colors.length * (blockSize + blockGap) + 5}`);
-		textMore.setAttribute('y', `${legendY - 3}`);
-		textMore.setAttribute('class', 'heatmap-label');
+		textMore.setAttribute("x", `${legendX + 20 + colors.length * (blockSize + blockGap) + 5}`);
+		textMore.setAttribute("y", `${legendY - 3}`);
+		textMore.setAttribute("class", "heatmap-label");
 		legendGroup.appendChild(textMore);
 
 		svg.appendChild(legendGroup);
@@ -330,19 +358,20 @@ export default class GitHeatmapPlugin extends Plugin {
 			const commits = await this.getCommitsForDate(basePath, dateStr);
 			list.empty();
 
-			commits.forEach(c => {
+			commits.forEach((c) => {
 				const item = list.createDiv({ cls: "commit-item-right" });
 
 				item.createDiv({ cls: "item-msg", text: c.message });
 
 				const meta = item.createDiv({ cls: "item-meta" });
-				const timeStr = c.date.split('T')[1]?.substring(0, 5) || "";
+				const timeStr = c.date.split("T")[1]?.substring(0, 5) || "";
 
 				meta.createSpan({ cls: "meta-val", text: timeStr });
 				meta.createSpan({ cls: "meta-sep", text: "·" });
 				meta.createSpan({ cls: "meta-val font-mono", text: c.hash.substring(0, 7) });
 			});
-		} catch (e) {
+		} catch {
+			// ✅ Optional: remove unused error variable
 			list.setText("Error loading details");
 		}
 	}
@@ -351,16 +380,28 @@ export default class GitHeatmapPlugin extends Plugin {
 		return new Promise((resolve) => {
 			const separator = "§§§";
 			const cmd = `git log --after="${date} 00:00:00" --before="${date} 23:59:59" --format="%H${separator}%s${separator}%an${separator}%aI" --date=iso`;
+
 			child_process.exec(cmd, { cwd }, (err, stdout) => {
-				if (err || !stdout) { resolve([]); return; }
+				if (err || !stdout) {
+					resolve([]);
+					return;
+				}
+
 				const commits: CommitDetail[] = [];
-				stdout.split('\n').forEach(line => {
+				stdout.split("\n").forEach((line) => {
 					if (!line.trim()) return;
+
 					const parts = line.split(separator);
 					if (parts.length >= 4) {
-						commits.push({ hash: parts[0], message: parts[1], author: parts[2], date: parts[3] });
+						commits.push({
+							hash: parts[0],
+							message: parts[1],
+							author: parts[2],
+							date: parts[3]
+						});
 					}
 				});
+
 				resolve(commits);
 			});
 		});
@@ -369,15 +410,24 @@ export default class GitHeatmapPlugin extends Plugin {
 
 class GitHeatmapSettingTab extends PluginSettingTab {
 	plugin: GitHeatmapPlugin;
-	constructor(app: App, plugin: GitHeatmapPlugin) { super(app, plugin); this.plugin = plugin; }
+
+	constructor(app: App, plugin: GitHeatmapPlugin) {
+		super(app, plugin);
+		this.plugin = plugin;
+	}
+
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-		new Setting(containerEl).setName('Default Days').addText(text =>
-			text.setValue(String(this.plugin.settings.defaultDays)).onChange(async (v) => {
-				this.plugin.settings.defaultDays = parseInt(v) || 365;
-				await this.plugin.saveSettings();
-			})
-		);
+
+		new Setting(containerEl)
+			// ✅ Required: sentence case
+			.setName("Default days")
+			.addText((text) =>
+				text.setValue(String(this.plugin.settings.defaultDays)).onChange(async (v) => {
+					this.plugin.settings.defaultDays = parseInt(v) || 365;
+					await this.plugin.saveSettings();
+				})
+			);
 	}
 }

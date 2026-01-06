@@ -61,11 +61,17 @@ var GitHeatmapPlugin = class extends import_obsidian.Plugin {
     await this.loadSettings();
     this.addSettingTab(new GitHeatmapSettingTab(this.app, this));
     this.registerMarkdownCodeBlockProcessor("git-heatmap", (source, el, ctx) => {
-      this.processHeatmap(source, el, ctx);
+      void this.processHeatmap(source, el, ctx);
     });
-    this.registerMarkdownCodeBlockProcessor("git-heatmap", (source, el, ctx) => {
-      this.processHeatmap(source, el, ctx);
+    this.registerMarkdownCodeBlockProcessor("githeat", (source, el, ctx) => {
+      void this.processHeatmap(source, el, ctx);
     });
+  }
+  onunload() {
+    if (this.keyHandler) {
+      window.removeEventListener("keydown", this.keyHandler);
+      this.keyHandler = null;
+    }
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -89,14 +95,17 @@ var GitHeatmapPlugin = class extends import_obsidian.Plugin {
     }
     try {
       const adapter = this.app.vault.adapter;
-      if (!adapter.getBasePath) throw new Error("\u65E0\u6CD5\u83B7\u53D6 Vault \u8DEF\u5F84");
+      if (!(adapter instanceof import_obsidian.FileSystemAdapter)) {
+        throw new Error("GitHeat only supports desktop vaults.");
+      }
       const basePath = adapter.getBasePath();
       const gitLog = await this.getGitLog(basePath, displayDays);
       const stats = this.parseGitLog(gitLog);
       this.renderHeatmap(scrollArea, infoArea, stats, basePath, displayDays);
     } catch (error) {
       scrollArea.empty();
-      scrollArea.createEl("div", { text: `\u26A0\uFE0F ${error.message}`, cls: "error-notice" });
+      const message = error instanceof Error ? error.message : String(error);
+      scrollArea.createEl("div", { text: `\u26A0\uFE0F ${message}`, cls: "error-notice" });
     }
   }
   async getGitLog(cwd, days) {
@@ -156,7 +165,7 @@ var GitHeatmapPlugin = class extends import_obsidian.Plugin {
       this.activeRect = rect;
       this.currentPos = { row, col };
       rect.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-      this.updateInfoArea(infoContainer, meta.dateStr, meta.count, basePath);
+      void this.updateInfoArea(infoContainer, meta.dateStr, meta.count, basePath);
     };
     const weekLabels = { 1: "Mon", 3: "Wed", 5: "Fri" };
     Object.keys(weekLabels).forEach((idxStr) => {
@@ -307,7 +316,12 @@ var GitHeatmapPlugin = class extends import_obsidian.Plugin {
           if (!line.trim()) return;
           const parts = line.split(separator);
           if (parts.length >= 4) {
-            commits.push({ hash: parts[0], message: parts[1], author: parts[2], date: parts[3] });
+            commits.push({
+              hash: parts[0],
+              message: parts[1],
+              author: parts[2],
+              date: parts[3]
+            });
           }
         });
         resolve(commits);
@@ -323,7 +337,7 @@ var GitHeatmapSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("Default Days").addText(
+    new import_obsidian.Setting(containerEl).setName("Default days").addText(
       (text) => text.setValue(String(this.plugin.settings.defaultDays)).onChange(async (v) => {
         this.plugin.settings.defaultDays = parseInt(v) || 365;
         await this.plugin.saveSettings();
