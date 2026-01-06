@@ -4,7 +4,8 @@
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
 	"description": "Displays a GitHub-style heatmap of local git commits.",
-	"author": "boerduo",
+	"author": "boerduoss",
 	"authorUrl": "https://github.com/boerduoss",
 	"isDesktopOnly": true
+
 }
