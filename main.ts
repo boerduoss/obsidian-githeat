@@ -40,6 +40,9 @@ export default class GitHeatmapPlugin extends Plugin {
 		this.registerMarkdownCodeBlockProcessor("git-heatmap", (source, el, ctx) => {
 			this.processHeatmap(source, el, ctx);
 		});
+		this.registerMarkdownCodeBlockProcessor("githeat", (source, el, ctx) => {
+			this.processHeatmap(source, el, ctx);
+		});
 	}
 
 	async loadSettings() {

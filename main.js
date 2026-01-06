@@ -63,6 +63,9 @@ var GitHeatmapPlugin = class extends import_obsidian.Plugin {
     this.registerMarkdownCodeBlockProcessor("git-heatmap", (source, el, ctx) => {
       this.processHeatmap(source, el, ctx);
     });
+    this.registerMarkdownCodeBlockProcessor("git-heatmap", (source, el, ctx) => {
+      this.processHeatmap(source, el, ctx);
+    });
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
