@@ -1,0 +1,10 @@
+{
+	"id": "obsidian-git-heatmap",
+	"name": "GitHeat",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Displays a GitHub-style heatmap of local git commits.",
+	"author": "boerduo",
+	"authorUrl": "https://github.com/boerduoss",
+	"isDesktopOnly": true
+}
